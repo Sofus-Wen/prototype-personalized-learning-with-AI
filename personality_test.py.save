@@ -1,0 +1,65 @@
+import streamlit as st
+import pyodbc
+
+# Database Connection Function
+def get_db_connection():
+    server = 'sofus-edu-ai-db-23.database.windows.net'
+    database = 'EduPersonaDB' 
+    username = 'sofu0715@niels.brock.dk'  # Replace with your actual username
+    password = 'gd82rns4nkas'  # Replace with your actual password
+    driver= '{ODBC Driver 17 for SQL Server}'
+    connection_string = f'DRIVER={driver};SERVER={server};PORT=1433;DATABASE={database};UID={username};PWD={password}'
+    cnxn = pyodbc.connect(connection_string)
+    return cnxn
+
+# Streamlit App
+st.title("Big Five Personality Test")
+st.write("Please rate your agreement with the following statements on a scale from 'Strongly Disagree' to 'Strongly Agree'.")
+
+questions = {
+    "I am someone who is talkative.": "Extroversion",
+    "I tend to find fault with others.": "Agreeableness",
+    "I do a thorough job.": "Conscientiousness",
+    "I get nervous easily.": "Neuroticism",
+    "I have an active imagination.": "Openness"
+}
+
+responses = {}
+scores = {"Strongly disagree": 1, "Disagree": 2, "Neutral": 3, "Agree": 4, "Strongly agree": 5}
+
+for question, trait in questions.items():
+    response = st.radio(question, ['Strongly disagree', 'Disagree', 'Neutral', 'Agree', 'Strongly agree'], key=question)
+    responses[trait] = responses.get(trait, []) + [response]
+
+if st.button('Submit'):
+    st.write("Thank you for completing the test!")
+
+    # Calculate scores
+    trait_scores = {}
+    for trait, response_list in responses.items():
+        total_score = sum(scores[response] for response in response_list)
+        average_score = total_score / len(response_list)
+        trait_scores[trait] = average_score
+
+    # Connect to the database
+    cnxn = get_db_connection()
+    cursor = cnxn.cursor()
+
+    # Insert data into the database
+    # Assuming 'user_id' is a unique identifier for each user
+    user_id = 123  # Replace with actual user ID
+    cursor.execute("""
+        INSERT INTO user_scores (user_id, extroversion, agreeableness, conscientiousness, neuroticism, openness)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+        extroversion = ?, agreeableness = ?, conscientiousness = ?, neuroticism = ?, openness = ?
+        """, (user_id, trait_scores['Extroversion'], trait_scores['Agreeableness'], trait_scores['Conscientiousness'], trait_scores['Neuroticism'], trait_scores['Openness'], trait_scores['Extroversion'], trait_scores['Agreeableness'], trait_scores['Conscientiousness'], trait_scores['Neuroticism'], trait_scores['Openness']))
+    cnxn.commit()
+
+    # Close the database connection
+    cnxn.close()
+
+    # Display responses
+    st.write("Your responses:", responses)
+
+# Run this with `streamlit run personality_test_prototype.py`

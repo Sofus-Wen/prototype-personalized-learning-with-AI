@@ -1,0 +1,87 @@
+import os
+import streamlit as st
+import sqlite3
+import openai
+from config import OPENAI_API_KEY, PINECONE_API_KEY, PINECONE_API_ENVIRONMENT
+from constants import PINECONE_INDEX_NAME
+from langchain.chat_models import ChatOpenAI
+from langchain.vectorstores import Pinecone
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.chains.question_answering import load_qa_chain
+import pinecone
+
+# Set API key for OpenAI and Pinecone
+os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
+pinecone.init(
+    api_key=PINECONE_API_KEY,
+    environment=PINECONE_API_ENVIRONMENT
+)
+
+# Function to retrieve personality scores from the database
+def get_personality_scores(user_id):
+    conn = sqlite3.connect('personality_scores.db')
+    c = conn.cursor()
+    c.execute("SELECT extroversion, agreeableness, conscientiousness, neuroticism, openness FROM user_scores WHERE user_id = ?", (user_id,))
+    scores = c.fetchone()
+    conn.close()
+    return scores
+
+# Function to generate personality description using OpenAI
+def generate_personality_description(scores):
+    score_summary = f"Extroversion: {scores[0]}, Agreeableness: {scores[1]}, Conscientiousness: {scores[2]}, Neuroticism: {scores[3]}, Openness: {scores[4]}."
+    prompt = f"Based on the following personality test scores, describe the personality traits of the user in a few words: {score_summary}"
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=prompt,
+        max_tokens=60
+    )
+    return response.choices[0].text.strip()
+
+def transform_scores_to_system_message(scores):
+    # Example transformation logic
+    # You can refine this logic based on how you want the scores to influence the chatbot
+    system_message = f"User has extroversion score of {scores[0]}, agreeableness score of {scores[1]}, conscientiousness score of {scores[2]}, neuroticism score of {scores[3]}, openness score of {scores[4]}."
+    return system_message
+
+# Streamlit App
+st.title('Niels Brock Tutor')
+usr_input = st.text_input('What is your question?')
+user_id = st.text_input('Enter your user ID or email')
+
+# Set OpenAI embeddings
+embeddings = OpenAIEmbeddings(client='')
+
+# Set Pinecone index
+docsearch = Pinecone.from_existing_index(index_name=PINECONE_INDEX_NAME, embedding=embeddings)
+
+# Check Streamlit input
+if usr_input and user_id:
+    # Retrieve personality scores
+    scores = get_personality_scores(user_id)
+    if scores:
+        # Transform scores to system message
+        system_message = transform_scores_to_system_message(scores)
+
+        # Initialize ChatOpenAI with system message within model_kwargs
+        llm_chat = ChatOpenAI(temperature=0.9, max_tokens=700, model='gpt-4', client='', model_kwargs={
+            "messages": [{"role": "system", "content": system_message}]
+        })
+
+        # Create chain with the initialized ChatOpenAI
+        chain = load_qa_chain(llm_chat)
+
+        # Generate LLM response
+        try:
+            # Use usr_input directly for similarity search and response generation
+            search = docsearch.similarity_search(usr_input)
+            response = chain.run(input_documents=search, question=usr_input)
+            st.write(response)
+        except Exception as e:
+            st.write('It looks like you entered an invalid prompt. Please try again.')
+            print(e)
+
+    with st.expander('Document Similarity Search'):
+        # Display results
+        search = docsearch.similarity_search(usr_input)
+        st.write(search)
+	
